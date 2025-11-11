@@ -1,12 +1,13 @@
 # ==========================================
-# 🧠 BERT Semantic Attention Visualizer (Professional Dark Minimal)
+# 🧠 BERT Semantic Attention Visualizer (TF version)
 # ==========================================
-import torch
 import streamlit as st
 import networkx as nx
 import plotly.graph_objects as go
 import plotly.express as px
-from transformers import BertTokenizer, BertModel
+from transformers import BertTokenizer, TFBertModel
+import tensorflow as tf
+import numpy as np
 
 # ==========================================
 # 🔹 Page Setup
@@ -25,16 +26,6 @@ st.markdown(
 
 st.title("🧠 BERT Semantic Attention Visualizer")
 st.caption("Interactive exploration of token-to-token attention from **BERT-base** — visualize semantic relationships via graph and heatmap.")
-st.markdown(
-    """
-    <div style='font-size:14px; color:#9ca3af;'>
-    Built for research and interpretability by <b>Girish G H</b> · 
-    <a href='https://girishgh7.github.io/personal-Website/' target='_blank' style='color:#3b82f6;'>Website</a> · 
-    <a href='mailto:girishghegde7@gmail.com' style='color:#3b82f6;'>Email</a>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
 
 # ==========================================
 # 🔹 Load Model + Tokenizer
@@ -42,8 +33,7 @@ st.markdown(
 @st.cache_resource
 def load_model():
     tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
-    model = BertModel.from_pretrained("bert-base-uncased", output_attentions=True)
-    model.eval()
+    model = TFBertModel.from_pretrained("bert-base-uncased", output_attentions=True)
     return tokenizer, model
 
 tokenizer, model = load_model()
@@ -60,21 +50,20 @@ threshold = st.slider("Attention Strength Threshold", 0.0, 1.0, 0.3, 0.05)
 if st.button("🔍 Visualize Attention"):
     with st.spinner("Analyzing BERT attention..."):
         # Tokenize and run model
-        inputs = tokenizer(sentence, return_tensors="pt")
-        with torch.no_grad():
-            outputs = model(**inputs)
-        attentions = outputs.attentions
-        tokens = tokenizer.convert_ids_to_tokens(inputs["input_ids"][0].tolist())
+        inputs = tokenizer(sentence, return_tensors="tf")
+        outputs = model(**inputs, training=False)
+        attentions = outputs.attentions  # tuple of (layer, batch, head, seq, seq)
+        tokens = tokenizer.convert_ids_to_tokens(inputs["input_ids"][0].numpy().tolist())
 
         # Average across layers & heads
-        attn_tensor = torch.stack(attentions).squeeze(1)
-        attn_mean = attn_tensor.mean(dim=(0, 1))
-        attn = attn_mean.detach().cpu().numpy()
+        attn_tensor = tf.stack(attentions)  # shape: (layers, batch, heads, seq, seq)
+        attn_mean = tf.reduce_mean(attn_tensor, axis=[0, 2])  # average batch & heads
+        attn = attn_mean[0].numpy()  # seq x seq
 
         # Remove [CLS] and [SEP]
         valid_indices = [i for i, t in enumerate(tokens) if t not in ["[CLS]", "[SEP]"]]
         words = [tokens[i] for i in valid_indices]
-        attn = attn[valid_indices][:, valid_indices]
+        attn = attn[np.ix_(valid_indices, valid_indices)]
         attn = attn / attn.max()
 
         # ==========================================
@@ -166,3 +155,5 @@ if st.button("🔍 Visualize Attention"):
                 st.plotly_chart(heatmap_fig, use_container_width=True)
 
             st.success("✅ Visualization complete.")
+
+
